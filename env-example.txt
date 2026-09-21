@@ -1,0 +1,26 @@
+# Elevate Quote Desk: settings.
+#
+# On Render: add each of these under Environment (do not upload a file with real passwords).
+# On your own computer: copy this file to a new file called .env and fill it in.
+
+# Your MongoDB Atlas connection string (Atlas > Connect > Drivers). Replace <password> with the database user's password.
+MONGODB_URI=mongodb+srv://quotedesk:YOUR-DB-PASSWORD@your-cluster.mongodb.net/?retryWrites=true&w=majority
+
+# Name of the database to use. A new name keeps this app separate from your website's data.
+MONGODB_DB=elevate_quote_desk
+
+# A long random text, at least 24 characters. Render can generate one for you. Never share it.
+JWT_SECRET=change-this-to-a-long-random-text-1234567890
+
+# The first admin login. Used only once, to create the admin. After that, change the password inside the app
+# and delete ADMIN_PASSWORD from the settings.
+ADMIN_USERNAME=admin
+ADMIN_PASSWORD=choose-a-strong-password
+ADMIN_NAME=Bala
+
+# How many staff logins the admin may create. This version's screen manages one.
+MAX_STAFF=1
+
+# Only if you forget the admin password: set FORCE_ADMIN_RESET=1 together with a new ADMIN_PASSWORD,
+# deploy once, sign in, then remove FORCE_ADMIN_RESET.
+# FORCE_ADMIN_RESET=1

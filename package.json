@@ -1,0 +1,21 @@
+{
+  "name": "elevate-quote-desk",
+  "version": "2.0.0",
+  "description": "Elevate Interiors quote desk: leads, quotations, work orders and agreements for Interiors and Paints, with admin and staff logins.",
+  "private": true,
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "build:client": "node scripts/build-client.js",
+    "test": "node test/smoke.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "express": "^4.22.3",
+    "jsonwebtoken": "^9.0.3",
+    "mongodb": "^6.21.0"
+  }
+}
