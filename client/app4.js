@@ -181,9 +181,9 @@ function paintQuotePage(q, c, label) {
   return `<section class="sheet pquote">${pageHead(q, label)}
     <h2 class="doc-title">${isQ ? 'Quotation for services' : 'Bill for services'}</h2>
     <div class="pinfo">${info.map(([k, v]) => `<div><span>${esc(k)}</span><b>${esc(v)}</b></div>`).join('')}</div>
-    <p class="pbasis">${esc(basis)}</p>
     <table class="ptab"><thead><tr><th>Product</th><th>Paintable surface</th><th>Painting system</th><th class="am">Area</th><th class="am">Rate / sq.ft</th><th class="am">Cost</th></tr></thead>
       <tbody>${groups || `<tr><td colspan="6" class="sy">No areas added yet.</td></tr>`}</tbody></table>
+    <p class="pbasis">${esc(basis)}</p>
     ${toolT}
     <div class="tot-wrap">${totalsHtml(q, c)}</div>${scheduleDoc(q, c)}</section>`;
 }
