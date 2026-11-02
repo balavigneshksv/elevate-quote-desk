@@ -27,7 +27,34 @@ function docHtml(q) {
   if (q.opts.cover) out += coverHtml(q, label);
   out += summaryHtml(q, c, label);
   if (q.opts.annexure) c.secs.forEach((x, i) => { out += annexHtml(x, i); });
+  if (q.opts.measure && hasMeasurements(q)) out += measureSheetHtml(q);
   return out;
+}
+/* ---------------- measurement sheet ---------------- */
+/* Interiors only: flattens every item that has a measurement sheet (see app3.js measBlock) into one
+   printable page, linked to this document by its number in the header (pageHead prints q.no either way). */
+function measureItems(q) {
+  const out = [];
+  (q.sections || []).forEach(s => (s.items || []).forEach(it => { if ((it.meas || []).length) out.push({ it, room: s.name || '' }); }));
+  return out;
+}
+const hasMeasurements = q => q.div !== 'paints' && measureItems(q).length > 0;
+function measureSheetHtml(q) {
+  const items = measureItems(q);
+  let n = 0, grand = 0;
+  const rows = items.map(({ it, room }) => {
+    n++;
+    const tot = measTotal(it); grand += tot;
+    const subRows = (it.meas || []).map((m, k) => `<tr><td class="ref">${n}.${k + 1}</td><td>${esc(m.label || '—')}</td><td class="am">${nfmt(m.nos)}</td><td class="am">${nfmt(m.l)}</td><td class="am">${nfmt(m.b)}</td><td class="am">${nfmt(num(m.nos) * num(m.l) * num(m.b))}</td></tr>`).join('');
+    return `<tr class="grp"><td colspan="5">${n}. ${esc(it.desc || 'Untitled item')}${room ? '  ·  ' + esc(room) : ''}</td><td class="am">${nfmt(tot)}</td></tr>${subRows}`;
+  }).join('');
+  return `<section class="sheet measure">${pageHead(q, 'Measurement Sheet')}
+    <h2 class="doc-title">Measurement sheet</h2>
+    <p class="lede">Site measurements behind ${esc(docLabel(q))} ${esc(q.no)}${q.client && q.client.name ? ', for ' + esc(q.client.name) : ''}. Each item's rows add up to the quantity used in the ${docLabel(q).toLowerCase()}.</p>
+    <table class="ptab mstab"><thead><tr><th>Ref</th><th>Description</th><th class="am">Nos</th><th class="am">Length (ft)</th><th class="am">Breadth / height (ft)</th><th class="am">Area (sq.ft)</th></tr></thead>
+    <tbody>${rows || `<tr><td colspan="6" class="sy">No measurements recorded yet.</td></tr>`}</tbody></table>
+    <div class="tot-wrap"><div class="totals"><div class="grand"><span>Total measured area</span><b>${nfmt(grand)} sq.ft</b></div></div></div>
+  </section>`;
 }
 function pageHead(q, label) {
   const isQ = q.type === 'quote';
@@ -65,9 +92,15 @@ function scheduleDoc(q, c) {
 }
 function notesBank(q) {
   const st = S.settings;
-  const bankTxt = [st.gstin ? 'GSTIN: ' + st.gstin : '', (st.bank || '').trim()].filter(Boolean).join('\n');
+  /* The cover page (when included) already prints our address once. When there is no
+     cover page — bills, by default — print it here instead, so it still appears exactly
+     once in the document. The GSTIN is shown only on documents where GST is charged. */
+  const co = [];
+  if (!q.opts.cover && (st.address || '').trim()) co.push(st.address.trim());
+  if (q.gstOn && (st.gstin || '').trim()) co.push('GSTIN: ' + st.gstin.trim());
+  const bankTxt = [co.join('\n'), (st.bank || '').trim()].filter(Boolean).join('\n');
   const notes = (q.notes || '').trim() ? `<div><div class="dh">Notes</div><div class="notes">${esc(q.notes)}</div></div>` : '';
-  const bank = bankTxt ? `<div><div class="dh">Bank &amp; tax details</div><div class="bank">${esc(bankTxt)}</div></div>` : '';
+  const bank = bankTxt ? `<div><div class="dh">${co.length ? 'Company &amp; bank details' : 'Bank details'}</div><div class="bank">${esc(bankTxt)}</div></div>` : '';
   return (notes || bank) ? `<div class="two block-avoid">${notes}${bank}</div>` : '';
 }
 const termsList = q => (q.terms || '').split('\n').map(x => x.trim()).filter(Boolean);
@@ -135,7 +168,7 @@ function paintCover(q, c) {
         <div class="kv"><span>Date of site visit</span><b>${p.visitDate ? fmtDate(p.visitDate) : '—'}</b></div><div class="kv"><span>Visited by</span><b>${esc(p.visitedBy || '—')}</b></div><div class="kv"><span>City</span><b>${esc(p.city || '—')}</b></div></div>
       <div class="pc-logo">${brandBlock(40)}</div>
       <div class="pc-c r"><div class="kv"><span>Service provider</span><b>${esc(st.name)}</b></div><div class="kv"><span>Address</span><b>${esc(st.address || '—')}</b></div>
-        <div class="kv"><span>Phone</span><b>${esc(st.phone || '—')}</b></div>${st.email ? `<div class="kv"><span>Email</span><b>${esc(st.email)}</b></div>` : ''}${st.gstin ? `<div class="kv"><span>GSTIN</span><b>${esc(st.gstin)}</b></div>` : ''}</div>
+        <div class="kv"><span>Phone</span><b>${esc(st.phone || '—')}</b></div>${st.email ? `<div class="kv"><span>Email</span><b>${esc(st.email)}</b></div>` : ''}${(q.gstOn && st.gstin) ? `<div class="kv"><span>GSTIN</span><b>${esc(st.gstin)}</b></div>` : ''}</div>
     </div>
     <div class="pc-main"><div class="eyebrow dark">Interior &amp; exterior painting</div><h1>Service Estimate</h1><p class="pc-est">Estimate no. ${esc(q.no)}</p>
       <div class="pc-cols">
@@ -387,19 +420,27 @@ function setPageFoot(q) {
   let el = $('#pagefoot');
   if (!el) { el = document.createElement('style'); el.id = 'pagefoot'; document.head.appendChild(el); }
   let lab = docLabel(q), no = q.no;
-  if (S.doc !== 'quote' && q.deal) { lab = S.doc === 'wo' ? 'Work order' : 'Agreement'; no = S.doc === 'wo' ? q.deal.woNo : q.deal.agNo; }
+  if (S.doc === 'measure') lab = 'Measurement sheet';
+  else if ((S.doc === 'wo' || S.doc === 'ag') && q.deal) { lab = S.doc === 'wo' ? 'Work order' : 'Agreement'; no = S.doc === 'wo' ? q.deal.woNo : q.deal.agNo; }
   const t = `${S.settings.name}  ·  ${lab} ${no}`.replace(/["\\\n]/g, '');
   el.textContent = `@page{@bottom-left{content:"${t}";font:8pt 'Source Sans 3',sans-serif;color:#7a848a;margin-left:16mm;vertical-align:top;padding-top:4mm}@bottom-right{content:counter(page);font:8pt 'Source Sans 3',sans-serif;color:#7a848a;margin-right:16mm;vertical-align:top;padding-top:4mm}}@page cover{@bottom-left{content:none}@bottom-right{content:none}}`;
 }
 function previewHtml() {
-  const q = S.cur, isQ = q.type === 'quote', kind = isQ && can('deals') ? S.doc : 'quote';
+  const q = S.cur, isQ = q.type === 'quote';
   const pt = q.div === 'paints';
-  const tabs = isQ && can('deals') ? `<div class="seg" role="group" aria-label="Document">${[['quote', pt ? 'Estimate' : 'Quotation'], ['wo', 'Work order'], ['ag', 'Agreement']].map(([k, l]) => `<button data-act="doc" data-kind="${k}" aria-pressed="${kind === k}">${l}</button>`).join('')}</div>` : '';
-  const body = kind === 'quote' ? docHtml(q) : flowHtml(dealDoc(q));
+  const kinds = [['quote', pt ? 'Estimate' : 'Quotation']];
+  if (isQ && can('deals')) kinds.push(['wo', 'Work order'], ['ag', 'Agreement']);
+  if (isQ && hasMeasurements(q)) kinds.push(['measure', 'Measurements']);
+  const kind = kinds.some(([k]) => k === S.doc) ? S.doc : 'quote';
+  const tabs = kinds.length > 1 ? `<div class="seg" role="group" aria-label="Document">${kinds.map(([k, l]) => `<button data-act="doc" data-kind="${k}" aria-pressed="${kind === k}">${l}</button>`).join('')}</div>` : '';
+  const body = kind === 'quote' ? docHtml(q) : kind === 'measure' ? measureSheetHtml(q) : flowHtml(dealDoc(q));
+  const note = kind === 'quote' ? 'This is exactly what the client will get.'
+    : kind === 'measure' ? 'Your own working record. Print or save it on its own here any time, whether or not it is switched on inside the quotation (set that in Edit, under "What to include").'
+    : 'Filled in from the ' + (pt ? 'estimate' : 'quotation') + '. Use Edit details to change the amount, dates or clauses, or download the Word file to change any wording freely.';
   return `<div class="edbar"><button class="btn ghost" data-act="back-edit">${ic('back')}Back to edit</button>${tabs}<div class="grow"></div>
-    ${kind !== 'quote' ? `<button class="btn" data-act="edit-deal">Edit details</button><button class="btn" data-act="download-doc">${ic('download')}Download Word</button>` : ''}
+    ${kind === 'wo' || kind === 'ag' ? `<button class="btn" data-act="edit-deal">Edit details</button><button class="btn" data-act="download-doc">${ic('download')}Download Word</button>` : ''}
     <button class="btn primary" data-act="print">${ic('print')}Print / Save as PDF</button></div>
-    <p class="pv-note">${kind === 'quote' ? 'This is exactly what the client will get.' : 'Filled in from the ' + (pt ? 'estimate' : 'quotation') + '. Use Edit details to change the amount, dates or clauses, or download the Word file to change any wording freely.'} In the print window choose <b>Save as PDF</b>, paper <b>A4</b>, and switch on <b>Background graphics</b>.</p>
+    <p class="pv-note">${note} In the print window choose <b>Save as PDF</b>, paper <b>A4</b>, and switch on <b>Background graphics</b>.</p>
     <div class="docwrap" id="docwrap"><div class="doc" id="doc">${body}</div></div>`;
 }
 function fitDoc() {

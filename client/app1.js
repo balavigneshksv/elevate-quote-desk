@@ -15,6 +15,7 @@ const inr = n => {
 };
 const inr2 = n => '₹' + (Math.round((n + Number.EPSILON) * 100) / 100).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const nfmt = n => (Math.round(num(n) * 100) / 100).toLocaleString('en-IN', { maximumFractionDigits: 2 });
+const round2 = n => Math.round(num(n) * 100) / 100;
 const pad = (n, w = 3) => String(n).padStart(w, '0');
 const isoDate = d => `${d.getFullYear()}-${pad(d.getMonth() + 1, 2)}-${pad(d.getDate(), 2)}`;
 const today = () => isoDate(new Date());
@@ -216,7 +217,7 @@ const S = {
   cur: null, isNew: false, dirty: false, saving: false, saveTimer: null, saveMsg: '', saveErr: false,
   lead: null, lNew: false, ldirty: false, lsaving: false, lTimer: null, lMsg: '', lErr: false,
   doc: 'quote', set: null, setTimer: null, setMsg: '', noDb: false,
-  perms: null, role: '', team: null, acct: null
+  perms: null, role: '', team: null, acct: null, dup: null
 };
 /* what this login may see and do (the server enforces the same rules) */
 const can = k => S.isOwner || !!(S.perms && S.perms[k]);
@@ -252,8 +253,11 @@ function nextNo(type, div) {
   return key + pad(max + 1);
 }
 const newItem = div => div === 'paints'
-  ? { id: uid(), desc: '', product: '', spec: '', size: '', qty: 0, unit: 'sq.ft', rate: 0, imgs: [] }
-  : { id: uid(), desc: '', spec: '', size: '', qty: 1, unit: 'sq.ft', rate: 0, imgs: [] };
+  ? { id: uid(), desc: '', product: '', spec: '', size: '', qty: 0, unit: 'sq.ft', rate: 0, imgs: [], meas: [] }
+  : { id: uid(), desc: '', spec: '', size: '', qty: 1, unit: 'sq.ft', rate: 0, imgs: [], meas: [] };
+const newMeasRow = () => ({ id: uid(), label: '', nos: 1, l: 0, b: 0 });
+/* the measurement sheet drives the item's Qty: nos × length × breadth/height, summed across every row */
+const measTotal = it => (it.meas || []).reduce((a, m) => a + num(m.nos) * num(m.l) * num(m.b), 0);
 const newSection = (name, div) => ({ id: uid(), name: name || '', dims: '', hero: '', items: [newItem(div)] });
 const newHealthArea = kind => ({ id: uid(), area: kind, name: '', obs: '', rows: (HEALTH_PRESETS[kind] || HEALTH_PRESETS.Other).map(s => ({ sym: s, sev: '', area: '', rec: '' })) });
 
@@ -266,7 +270,7 @@ function newQuote(type, div, lead) {
     sections: [], discount: { mode: 'pct', value: 0 }, gstOn: true, gstPct: num(st.gstPct),
     notes: '', terms: isQ ? (pt ? st.paintTerms : st.terms) : st.billTerms,
     schedule: clone(pt ? st.paintSchedule : st.schedule).map(r => ({ ...r, date: '' })), payments: [],
-    opts: pt ? { cover: isQ, why: true, health: isQ, photos: isQ, annexure: false } : { cover: isQ, why: true, annexure: isQ, health: false, photos: false },
+    opts: pt ? { cover: isQ, why: true, health: isQ, photos: isQ, annexure: false } : { cover: isQ, why: true, annexure: isQ, health: false, photos: false, measure: false },
     leadId: lead ? lead.id : '', rev: 0, parent: '',
     createdBy: S.me.id, createdAt: Date.now(), updatedAt: Date.now(), history: [{ s: 'draft', at: Date.now(), by: S.me.id }], total: 0
   };

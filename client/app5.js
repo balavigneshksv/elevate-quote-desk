@@ -136,11 +136,15 @@ function normalize(q) {
   q.client = { name: '', phone: '', email: '', address: '', ...(q.client || {}) };
   q.sections = (q.sections || []).map(s => ({
     id: s.id || uid(), name: '', dims: '', hero: '', ...s,
-    items: (s.items || []).map(i => ({ id: i.id || uid(), desc: '', spec: '', size: '', qty: pt ? 0 : 1, unit: 'sq.ft', rate: 0, ...(pt ? { product: '' } : {}), ...i, imgs: Array.isArray(i.imgs) ? i.imgs : [] }))
+    items: (s.items || []).map(i => ({
+      id: i.id || uid(), desc: '', spec: '', size: '', qty: pt ? 0 : 1, unit: 'sq.ft', rate: 0, ...(pt ? { product: '' } : {}), ...i,
+      imgs: Array.isArray(i.imgs) ? i.imgs : [],
+      meas: Array.isArray(i.meas) ? i.meas.map(m => ({ id: m.id || uid(), label: '', nos: 1, l: 0, b: 0, ...m })) : []
+    }))
   }));
   q.discount = { mode: 'pct', value: 0, ...(q.discount || {}) };
   q.gstOn = q.gstOn !== false; if (q.gstPct == null) q.gstPct = 18;
-  q.opts = pt ? { cover: true, why: true, health: true, photos: true, annexure: false, ...(q.opts || {}) } : { cover: true, why: true, annexure: true, health: false, photos: false, ...(q.opts || {}) };
+  q.opts = pt ? { cover: true, why: true, health: true, photos: true, annexure: false, ...(q.opts || {}) } : { cover: true, why: true, annexure: true, health: false, photos: false, measure: false, ...(q.opts || {}) };
   q.schedule = (q.schedule || []).map(r => ({ date: '', ...r })); q.payments = q.payments || []; q.history = q.history || [];
   if (pt) {
     q.paint = { visitDate: '', visitedBy: '', city: '', tier: 'Classic', basis: 'measured', days: '', start: '', end: '', ...(q.paint || {}) };
@@ -171,8 +175,60 @@ function openQ(id, view, doc) {
   const q = S.quotes.get(id);
   if (!q) return;
   S.cur = normalize(clone(q)); S.isNew = false; S.dirty = false; S.saveMsg = ''; S.saveErr = false; S.view = view; S.doc = doc || 'quote'; S.tab = q.div;
-  if (S.doc !== 'quote') ensureDeal();
+  if (S.doc === 'wo' || S.doc === 'ag') ensureDeal();
   render();
+}
+/* ---------------- duplicate, with the copy placed under a client ---------------- */
+function renderDup() { const el = $('#dupmodal'); if (el) el.innerHTML = S.dup ? dupModalHtml() : ''; }
+function dupModalHtml() {
+  const dp = S.dup; if (!dp) return '';
+  const src = S.quotes.get(dp.id); if (!src) return '';
+  const div = src.div, pt = div === 'paints';
+  const word = pt ? (src.type === 'quote' ? 'estimate' : 'bill') : (src.type === 'quote' ? 'quotation' : 'bill');
+  const names = [...S.leads.values()].filter(l => l.div === div).map(l => l.name).filter(Boolean);
+  return `<div class="modal-bg"><div class="modal">
+    <h3>Duplicate this ${esc(word)}</h3>
+    <p class="hint">Who is this copy for? Leave the name as it is to keep it with ${esc(src.client && src.client.name ? src.client.name : 'the same client')}. Type an existing name to move the copy under that client instead, or a new name to create a new lead for it.</p>
+    <datalist id="duplist">${names.map(n => `<option value="${esc(n)}">`).join('')}</datalist>
+    <div class="f"><label for="dup-name">Client name</label><input class="text" id="dup-name" list="duplist" value="${esc(dp.name)}" autocomplete="off" ${dp.busy ? 'disabled' : ''}></div>
+    <div class="f" style="margin-top:10px"><label for="dup-phone">Phone <span class="hint" style="text-transform:none;letter-spacing:0">(used only if a new lead is created)</span></label><input class="text" id="dup-phone" value="${esc(dp.phone)}" ${dp.busy ? 'disabled' : ''}></div>
+    ${dp.err ? `<p class="hint" style="color:#b5392c;margin-top:10px">${esc(dp.err)}</p>` : ''}
+    <div class="btnrow" style="margin-top:18px;justify-content:flex-end">
+      <button class="btn ghost" data-act="dup-cancel" ${dp.busy ? 'disabled' : ''}>Cancel</button>
+      <button class="btn primary" data-act="dup-go" ${dp.busy ? 'disabled' : ''}>${dp.busy ? 'Duplicating…' : 'Duplicate'}</button>
+    </div>
+  </div></div>`;
+}
+async function doDuplicate() {
+  const dp = S.dup; if (!dp || dp.busy) return;
+  const src = S.quotes.get(dp.id); if (!src) { S.dup = null; renderDup(); return; }
+  const nameEl = $('#dup-name'), phoneEl = $('#dup-phone');
+  const name = ((nameEl ? nameEl.value : dp.name) || '').trim();
+  const phone = ((phoneEl ? phoneEl.value : dp.phone) || '').trim();
+  if (!name) { dp.err = 'Enter the client name'; renderDup(); return; }
+  dp.name = name; dp.phone = phone; dp.busy = true; dp.err = ''; renderDup();
+  try {
+    const div = src.div, norm = s => (s || '').trim().toLowerCase();
+    let lead = [...S.leads.values()].find(l => l.div === div && norm(l.name) === norm(name)), isNewLead = false;
+    if (!lead) {
+      lead = newLead(div); lead.name = name; lead.phone = phone; isNewLead = true;
+      await S.db.doc('leads/' + lead.id).set(strip(lead));
+      S.leads.set(lead.id, lead);
+    }
+    const q = normalize(clone(src));
+    q.id = uid(); q.no = nextNo(q.type, q.div); q.status = 'draft'; q.date = today(); q.followUp = ''; q.payments = []; q.rev = 0; q.parent = ''; delete q.deal;
+    const sameLead = lead.id === src.leadId;
+    q.leadId = lead.id;
+    q.client = { name: lead.name || name, phone: lead.phone || phone, email: (lead.email || (src.client && src.client.email) || ''), address: (lead.address || (src.client && src.client.address) || '') };
+    if (!sameLead) q.site = lead.address || q.site;
+    q.validUntil = q.type === 'quote' ? addDays(q.date, (q.div === 'paints' ? num(S.settings.paintValidityDays) : num(S.settings.validityDays)) || 15) : '';
+    q.createdBy = S.me.id; q.createdAt = q.updatedAt = Date.now(); q.history = [{ s: 'draft', at: Date.now(), by: S.me.id }];
+    await S.db.doc('quotes/' + q.id).set(strip(q));
+    S.dup = null; renderDup();
+    toast(isNewLead ? `Copied as ${q.no}, under a new lead for ${name}` : `Copied as ${q.no}, under ${lead.name}`);
+  } catch {
+    dp.busy = false; dp.err = 'Could not duplicate. Try again.'; renderDup();
+  }
 }
 async function changeLeadStage(stage) {
   const l = S.lead;
@@ -258,13 +314,13 @@ async function act(b) {
     case 'open-doc': openQ(d.id, 'preview', d.kind); break;
     case 'dup': {
       const src = S.quotes.get(d.id); if (!src) break;
-      const q = normalize(clone(src));
-      q.id = uid(); q.no = nextNo(q.type, q.div); q.status = 'draft'; q.date = today(); q.followUp = ''; q.payments = []; q.leadId = ''; q.parent = ''; q.rev = 0; delete q.deal;
-      q.validUntil = q.type === 'quote' ? addDays(q.date, (q.div === 'paints' ? num(S.settings.paintValidityDays) : num(S.settings.validityDays)) || 15) : '';
-      q.createdBy = S.me.id; q.createdAt = q.updatedAt = Date.now(); q.history = [{ s: 'draft', at: Date.now(), by: S.me.id }];
-      try { await S.db.doc('quotes/' + q.id).set(strip(q)); toast('Copied as ' + q.no); } catch { toast('Could not duplicate'); }
+      S.dup = { id: d.id, name: (src.client && src.client.name) || '', phone: (src.client && src.client.phone) || '', busy: false, err: '' };
+      renderDup();
+      setTimeout(() => { const e = $('#dup-name'); if (e) { e.focus(); e.select(); } }, 30);
       break;
     }
+    case 'dup-cancel': if (!S.dup || S.dup.busy) break; S.dup = null; renderDup(); break;
+    case 'dup-go': await doDuplicate(); break;
     case 'revise': {
       if (S.cur && S.cur.id === d.id) { clearTimeout(S.saveTimer); S.dirty = true; await flushSave(); }
       const src = S.cur && S.cur.id === d.id ? S.cur : S.quotes.get(d.id); if (!src) break;
@@ -288,8 +344,8 @@ async function act(b) {
     case 'type': S.typeF = d.v; S.statusF = 'all'; refreshList(); break;
     case 'filter': S.statusF = (S.statusF === d.v && d.v !== 'all') ? 'all' : d.v; refreshList(); break;
     case 'back': { const div = cur ? cur.div : S.tab; await leaveEditor(); S.tab = div; S.sub = 'quotes'; S.view = 'home'; render(); break; }
-    case 'to-preview': S.doc = d.kind || 'quote'; if (S.doc !== 'quote') ensureDeal(); S.view = 'preview'; render(); break;
-    case 'doc': S.doc = d.kind; if (S.doc !== 'quote') ensureDeal(); render(); break;
+    case 'to-preview': S.doc = d.kind || 'quote'; if (S.doc === 'wo' || S.doc === 'ag') ensureDeal(); S.view = 'preview'; render(); break;
+    case 'doc': S.doc = d.kind; if (S.doc === 'wo' || S.doc === 'ag') ensureDeal(); render(); break;
     case 'back-edit': S.view = 'edit'; render(); break;
     case 'edit-deal': S.view = 'edit'; render(); scrollToEl('deal'); break;
     case 'download-doc': await downloadDoc(); break;
@@ -312,6 +368,14 @@ async function act(b) {
     case 'down-item': if (move(cur.sections[si].items, ii, 1)) { touch(); rerenderEdit(); } break;
     case 'add-img': await addImages('item', si, ii); break;
     case 'del-img': cur.sections[si].items[ii].imgs.splice(+d.k, 1); touch(); rerenderEdit(); break;
+    case 'add-meas': {
+      const it = cur.sections[si].items[ii]; it.meas = it.meas || []; it.meas.push(newMeasRow()); it.qty = round2(measTotal(it)); touch();
+      rerenderEdit(`f-cur-sections-${si}-items-${ii}-meas-${it.meas.length - 1}-label`); break;
+    }
+    case 'del-meas': {
+      const it = cur.sections[si].items[ii]; it.meas.splice(+d.k, 1); it.qty = round2(measTotal(it)); touch(); rerenderEdit(); break;
+    }
+    case 'clear-meas': cur.sections[si].items[ii].meas = []; touch(); rerenderEdit(); break;
     case 'add-hero': await addImages('hero', si); break;
     case 'del-hero': cur.sections[si].hero = ''; touch(); rerenderEdit(); break;
     case 'add-photos': await addImages('photos'); break;
@@ -378,6 +442,8 @@ function onField(e) {
   setPath(root, p, v);
   if (p === 'deal.amountAuto') { if (v === false && !num(S.cur.deal.amount)) S.cur.deal.amount = calc(S.cur).total; touch(); rerenderEdit(); return; }
   if (e.type === 'change' && /^sections\.\d+\.items\.\d+\.(desc|product)$/.test(p)) catalogFill(p);
+  const mm = p.match(/^sections\.(\d+)\.items\.(\d+)\.meas\.\d+\.(nos|l|b)$/);
+  if (mm) { const it = S.cur.sections[+mm[1]].items[+mm[2]]; it.qty = round2(measTotal(it)); }
   touch(); refreshLive();
 }
 function catalogFill(p) {

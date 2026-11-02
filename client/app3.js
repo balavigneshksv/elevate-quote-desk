@@ -94,6 +94,7 @@ function includeBlock(q, pt) {
     ${toggle('cur', 'opts.why', q.opts.why, '“Why choose us” points on the cover')}
     ${pt ? toggle('cur', 'opts.health', q.opts.health, 'Site health card', 'The symptoms recorded at the site, with recommendations.') + toggle('cur', 'opts.photos', q.opts.photos, 'Site photos')
       : toggle('cur', 'opts.annexure', q.opts.annexure, 'Annexure with photos and specifications', 'One page per room, after the summary.')}
+    ${!pt && hasMeasurements(q) ? toggle('cur', 'opts.measure', q.opts.measure, 'Measurement sheet at the end', 'Every item’s length × breadth rows, added as extra pages. It is also always available on its own from Preview, to give or download separately.') : ''}
   </section>`;
 }
 /* --- interiors rooms --- */
@@ -133,12 +134,15 @@ const itemTools = (si, ii, n) => `<div class="it-tools">
   <button class="btn ghost icon" data-act="down-item" data-si="${si}" data-ii="${ii}" title="Move down" aria-label="Move down" ${ii === n - 1 ? 'disabled' : ''}>${ic('down')}</button>
   ${delBtn('del-item', `data-si="${si}" data-ii="${ii}"`, 'Delete item')}</div>`;
 function itemHtml(it, si, ii, n) {
-  const p = `sections.${si}.items.${ii}`;
+  const p = `sections.${si}.items.${ii}`, hasMeas = (it.meas || []).length > 0;
+  const qtyField = hasMeas
+    ? `<div class="f"><label for="f-cur-sections-${si}-items-${ii}-qty">Qty</label><input class="text num" id="f-cur-sections-${si}-items-${ii}-qty" type="text" value="${esc(nfmt(it.qty))}" readonly title="From the measurement sheet below"></div>`
+    : fld('cur', p + '.qty', 'Qty', { num: true });
   return `<div class="it">
     <div class="it-g">
       ${fld('cur', p + '.desc', 'Item', { list: 'catalog', ph: 'e.g. Sliding wardrobe' })}
       ${fld('cur', p + '.size', 'Size', { ph: `8' × 7'` })}
-      ${fld('cur', p + '.qty', 'Qty', { num: true })}
+      ${qtyField}
       ${fld('cur', p + '.unit', 'Unit', { sel: UNITS })}
       ${fld('cur', p + '.rate', 'Rate (₹)', { num: true })}
       <div class="f"><label>Amount</label><div class="it-amt" id="amt-${si}-${ii}"></div></div>
@@ -150,6 +154,27 @@ function itemHtml(it, si, ii, n) {
     <div class="thumbs" style="margin-top:10px">
       ${(it.imgs || []).map((id, k) => `<div class="thumb"><img src="/_blob/${esc(id)}" alt=""><button data-act="del-img" data-si="${si}" data-ii="${ii}" data-k="${k}" aria-label="Remove photo">×</button></div>`).join('')}
       ${(it.imgs || []).length < 3 ? `<button class="addimg" data-act="add-img" data-si="${si}" data-ii="${ii}">${ic('img')}Add photo</button>` : ''}
+    </div>
+    ${measBlock(it, si, ii)}
+  </div>`;
+}
+function measBlock(it, si, ii) {
+  const rows = it.meas || [];
+  if (!rows.length) return `<div class="meas-addrow"><button class="btn small ghost" data-act="add-meas" data-si="${si}" data-ii="${ii}">${ic('plus')}Add a measurement sheet</button></div>`;
+  const p = `sections.${si}.items.${ii}`;
+  return `<div class="meastab">
+    <div class="meas-h"><small>Measurement sheet <span class="hint" style="text-transform:none;letter-spacing:0">— these rows add up to the Qty above, and can be given to the client as their own sheet</span></small></div>
+    <div class="rowtab rt-meas meas-head"><span>Description</span><span>Nos</span><span>Length (ft)</span><span>Breadth / height (ft)</span><span>Area (sq.ft)</span><span></span></div>
+    ${rows.map((m, k) => `<div class="rowtab rt-meas">
+      ${fld('cur', `${p}.meas.${k}.label`, '', { ph: 'e.g. Left' })}
+      ${fld('cur', `${p}.meas.${k}.nos`, '', { num: true })}
+      ${fld('cur', `${p}.meas.${k}.l`, '', { num: true })}
+      ${fld('cur', `${p}.meas.${k}.b`, '', { num: true })}
+      <div class="it-amt" id="meas-amt-${si}-${ii}-${k}">${nfmt(num(m.nos) * num(m.l) * num(m.b))}</div>
+      ${delBtn('del-meas', `data-si="${si}" data-ii="${ii}" data-k="${k}"`, 'Delete row')}</div>`).join('')}
+    <div class="btnrow" style="margin-top:8px">
+      <button class="btn small" data-act="add-meas" data-si="${si}" data-ii="${ii}">${ic('plus')}Add row</button>
+      <button class="btn small ghost" data-act="clear-meas" data-si="${si}" data-ii="${ii}">Remove measurement sheet</button>
     </div>
   </div>`;
 }
@@ -293,7 +318,14 @@ function refreshLive() {
   if (!q || S.view !== 'edit') return;
   const c = calc(q);
   q.sections.forEach((s, si) => {
-    s.items.forEach((it, ii) => { const e = $(`#amt-${si}-${ii}`); if (e) e.textContent = inr(num(it.qty) * num(it.rate)); });
+    s.items.forEach((it, ii) => {
+      const e = $(`#amt-${si}-${ii}`); if (e) e.textContent = inr(num(it.qty) * num(it.rate));
+      if ((it.meas || []).length) {
+        it.meas.forEach((m, k) => { const me = $(`#meas-amt-${si}-${ii}-${k}`); if (me) me.textContent = nfmt(num(m.nos) * num(m.l) * num(m.b)); });
+        const qe = document.getElementById(`f-cur-sections-${si}-items-${ii}-qty`);
+        if (qe && document.activeElement !== qe) qe.value = nfmt(it.qty);
+      }
+    });
     const e = $(`#sub-${si}`); if (e) e.textContent = inr(c.secs[si] ? c.secs[si].sub : 0);
   });
   (q.tools || []).forEach((t, i) => { const e = $('#tamt-' + i); if (e) e.textContent = inr(num(t.qty) * num(t.rate)); });

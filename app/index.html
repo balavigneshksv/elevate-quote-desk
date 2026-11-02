@@ -196,6 +196,12 @@ textarea.text{resize:vertical;line-height:1.45}
 .toast.on{opacity:1;transform:translate(-50%,0)}
 .banner{background:var(--warn-bg);color:var(--warn);border:1px solid var(--warn);border-radius:6px;padding:12px 16px;margin-bottom:16px;font-size:14px}
 
+/* ---------- modal ---------- */
+.modal-bg{position:fixed;inset:0;background:rgba(10,14,22,.55);display:flex;align-items:center;justify-content:center;padding:20px;z-index:70}
+.modal{background:var(--surface);border-radius:8px;max-width:420px;width:100%;padding:22px;box-shadow:0 20px 60px rgba(0,0,0,.35)}
+.modal h3{font-family:var(--display);font-size:19px;margin:0 0 8px}
+.modal .f{margin-top:0}
+
 /* ================== THE DOCUMENT (paper) ================== */
 .doc{width:210mm;margin:0 auto;color:var(--d-ink);font:400 9.6pt/1.5 var(--sans);transform-origin:top center}
 .doc *{box-sizing:border-box}
@@ -369,6 +375,12 @@ textarea.text{resize:vertical;line-height:1.45}
 .rt-catalog{grid-template-columns:minmax(0,1.6fr) minmax(0,2fr) 90px 110px 36px}
 .rt-paintCatalog{grid-template-columns:minmax(0,1.3fr) minmax(0,2.2fr) 120px 36px}
 .rt-tools{grid-template-columns:minmax(0,1fr) 140px 36px}
+.rt-meas{grid-template-columns:minmax(0,1.3fr) 76px 90px 110px 100px 36px}
+.meas-head{font-size:11.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin-bottom:4px}
+.meas-head span:last-child{visibility:hidden}
+.meastab{margin-top:12px;padding-top:12px;border-top:1px dashed var(--line)}
+.meas-h{margin-bottom:8px}
+.meas-addrow{margin-top:10px}
 .it-g.pt{grid-template-columns:minmax(0,1fr) minmax(0,1.4fr) 96px 76px 90px 110px}
 .sec-h.hh{grid-template-columns:150px minmax(0,1fr) auto}
 .sec-h.ph{grid-template-columns:auto minmax(0,1fr) auto auto}
@@ -729,6 +741,7 @@ const inr = n => {
 };
 const inr2 = n => '₹' + (Math.round((n + Number.EPSILON) * 100) / 100).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const nfmt = n => (Math.round(num(n) * 100) / 100).toLocaleString('en-IN', { maximumFractionDigits: 2 });
+const round2 = n => Math.round(num(n) * 100) / 100;
 const pad = (n, w = 3) => String(n).padStart(w, '0');
 const isoDate = d => `${d.getFullYear()}-${pad(d.getMonth() + 1, 2)}-${pad(d.getDate(), 2)}`;
 const today = () => isoDate(new Date());
@@ -930,7 +943,7 @@ const S = {
   cur: null, isNew: false, dirty: false, saving: false, saveTimer: null, saveMsg: '', saveErr: false,
   lead: null, lNew: false, ldirty: false, lsaving: false, lTimer: null, lMsg: '', lErr: false,
   doc: 'quote', set: null, setTimer: null, setMsg: '', noDb: false,
-  perms: null, role: '', team: null, acct: null
+  perms: null, role: '', team: null, acct: null, dup: null
 };
 /* what this login may see and do (the server enforces the same rules) */
 const can = k => S.isOwner || !!(S.perms && S.perms[k]);
@@ -966,8 +979,11 @@ function nextNo(type, div) {
   return key + pad(max + 1);
 }
 const newItem = div => div === 'paints'
-  ? { id: uid(), desc: '', product: '', spec: '', size: '', qty: 0, unit: 'sq.ft', rate: 0, imgs: [] }
-  : { id: uid(), desc: '', spec: '', size: '', qty: 1, unit: 'sq.ft', rate: 0, imgs: [] };
+  ? { id: uid(), desc: '', product: '', spec: '', size: '', qty: 0, unit: 'sq.ft', rate: 0, imgs: [], meas: [] }
+  : { id: uid(), desc: '', spec: '', size: '', qty: 1, unit: 'sq.ft', rate: 0, imgs: [], meas: [] };
+const newMeasRow = () => ({ id: uid(), label: '', nos: 1, l: 0, b: 0 });
+/* the measurement sheet drives the item's Qty: nos × length × breadth/height, summed across every row */
+const measTotal = it => (it.meas || []).reduce((a, m) => a + num(m.nos) * num(m.l) * num(m.b), 0);
 const newSection = (name, div) => ({ id: uid(), name: name || '', dims: '', hero: '', items: [newItem(div)] });
 const newHealthArea = kind => ({ id: uid(), area: kind, name: '', obs: '', rows: (HEALTH_PRESETS[kind] || HEALTH_PRESETS.Other).map(s => ({ sym: s, sev: '', area: '', rec: '' })) });
 
@@ -980,7 +996,7 @@ function newQuote(type, div, lead) {
     sections: [], discount: { mode: 'pct', value: 0 }, gstOn: true, gstPct: num(st.gstPct),
     notes: '', terms: isQ ? (pt ? st.paintTerms : st.terms) : st.billTerms,
     schedule: clone(pt ? st.paintSchedule : st.schedule).map(r => ({ ...r, date: '' })), payments: [],
-    opts: pt ? { cover: isQ, why: true, health: isQ, photos: isQ, annexure: false } : { cover: isQ, why: true, annexure: isQ, health: false, photos: false },
+    opts: pt ? { cover: isQ, why: true, health: isQ, photos: isQ, annexure: false } : { cover: isQ, why: true, annexure: isQ, health: false, photos: false, measure: false },
     leadId: lead ? lead.id : '', rev: 0, parent: '',
     createdBy: S.me.id, createdAt: Date.now(), updatedAt: Date.now(), history: [{ s: 'draft', at: Date.now(), by: S.me.id }], total: 0
   };
@@ -1167,7 +1183,7 @@ function render() {
   else if (S.view === 'edit' && S.cur) main = editHtml();
   else if (S.view === 'lead' && S.lead) main = leadHtml();
   else if (S.view === 'preview' && S.cur) main = previewHtml();
-  app.innerHTML = appbarHtml() + `<main class="wrap" id="main">${main}</main><div id="toast" class="toast" role="status" aria-live="polite"></div>`;
+  app.innerHTML = appbarHtml() + `<main class="wrap" id="main">${main}</main><div id="toast" class="toast" role="status" aria-live="polite"></div><div id="dupmodal">${S.dup ? dupModalHtml() : ''}</div>`;
   window.scrollTo(0, 0);
   if (S.view === 'home') refreshHome();
   if (S.view === 'edit') { paintSave(); refreshLive(); }
@@ -1467,6 +1483,7 @@ function includeBlock(q, pt) {
     ${toggle('cur', 'opts.why', q.opts.why, '“Why choose us” points on the cover')}
     ${pt ? toggle('cur', 'opts.health', q.opts.health, 'Site health card', 'The symptoms recorded at the site, with recommendations.') + toggle('cur', 'opts.photos', q.opts.photos, 'Site photos')
       : toggle('cur', 'opts.annexure', q.opts.annexure, 'Annexure with photos and specifications', 'One page per room, after the summary.')}
+    ${!pt && hasMeasurements(q) ? toggle('cur', 'opts.measure', q.opts.measure, 'Measurement sheet at the end', 'Every item’s length × breadth rows, added as extra pages. It is also always available on its own from Preview, to give or download separately.') : ''}
   </section>`;
 }
 /* --- interiors rooms --- */
@@ -1506,12 +1523,15 @@ const itemTools = (si, ii, n) => `<div class="it-tools">
   <button class="btn ghost icon" data-act="down-item" data-si="${si}" data-ii="${ii}" title="Move down" aria-label="Move down" ${ii === n - 1 ? 'disabled' : ''}>${ic('down')}</button>
   ${delBtn('del-item', `data-si="${si}" data-ii="${ii}"`, 'Delete item')}</div>`;
 function itemHtml(it, si, ii, n) {
-  const p = `sections.${si}.items.${ii}`;
+  const p = `sections.${si}.items.${ii}`, hasMeas = (it.meas || []).length > 0;
+  const qtyField = hasMeas
+    ? `<div class="f"><label for="f-cur-sections-${si}-items-${ii}-qty">Qty</label><input class="text num" id="f-cur-sections-${si}-items-${ii}-qty" type="text" value="${esc(nfmt(it.qty))}" readonly title="From the measurement sheet below"></div>`
+    : fld('cur', p + '.qty', 'Qty', { num: true });
   return `<div class="it">
     <div class="it-g">
       ${fld('cur', p + '.desc', 'Item', { list: 'catalog', ph: 'e.g. Sliding wardrobe' })}
       ${fld('cur', p + '.size', 'Size', { ph: `8' × 7'` })}
-      ${fld('cur', p + '.qty', 'Qty', { num: true })}
+      ${qtyField}
       ${fld('cur', p + '.unit', 'Unit', { sel: UNITS })}
       ${fld('cur', p + '.rate', 'Rate (₹)', { num: true })}
       <div class="f"><label>Amount</label><div class="it-amt" id="amt-${si}-${ii}"></div></div>
@@ -1523,6 +1543,27 @@ function itemHtml(it, si, ii, n) {
     <div class="thumbs" style="margin-top:10px">
       ${(it.imgs || []).map((id, k) => `<div class="thumb"><img src="/_blob/${esc(id)}" alt=""><button data-act="del-img" data-si="${si}" data-ii="${ii}" data-k="${k}" aria-label="Remove photo">×</button></div>`).join('')}
       ${(it.imgs || []).length < 3 ? `<button class="addimg" data-act="add-img" data-si="${si}" data-ii="${ii}">${ic('img')}Add photo</button>` : ''}
+    </div>
+    ${measBlock(it, si, ii)}
+  </div>`;
+}
+function measBlock(it, si, ii) {
+  const rows = it.meas || [];
+  if (!rows.length) return `<div class="meas-addrow"><button class="btn small ghost" data-act="add-meas" data-si="${si}" data-ii="${ii}">${ic('plus')}Add a measurement sheet</button></div>`;
+  const p = `sections.${si}.items.${ii}`;
+  return `<div class="meastab">
+    <div class="meas-h"><small>Measurement sheet <span class="hint" style="text-transform:none;letter-spacing:0">— these rows add up to the Qty above, and can be given to the client as their own sheet</span></small></div>
+    <div class="rowtab rt-meas meas-head"><span>Description</span><span>Nos</span><span>Length (ft)</span><span>Breadth / height (ft)</span><span>Area (sq.ft)</span><span></span></div>
+    ${rows.map((m, k) => `<div class="rowtab rt-meas">
+      ${fld('cur', `${p}.meas.${k}.label`, '', { ph: 'e.g. Left' })}
+      ${fld('cur', `${p}.meas.${k}.nos`, '', { num: true })}
+      ${fld('cur', `${p}.meas.${k}.l`, '', { num: true })}
+      ${fld('cur', `${p}.meas.${k}.b`, '', { num: true })}
+      <div class="it-amt" id="meas-amt-${si}-${ii}-${k}">${nfmt(num(m.nos) * num(m.l) * num(m.b))}</div>
+      ${delBtn('del-meas', `data-si="${si}" data-ii="${ii}" data-k="${k}"`, 'Delete row')}</div>`).join('')}
+    <div class="btnrow" style="margin-top:8px">
+      <button class="btn small" data-act="add-meas" data-si="${si}" data-ii="${ii}">${ic('plus')}Add row</button>
+      <button class="btn small ghost" data-act="clear-meas" data-si="${si}" data-ii="${ii}">Remove measurement sheet</button>
     </div>
   </div>`;
 }
@@ -1666,7 +1707,14 @@ function refreshLive() {
   if (!q || S.view !== 'edit') return;
   const c = calc(q);
   q.sections.forEach((s, si) => {
-    s.items.forEach((it, ii) => { const e = $(`#amt-${si}-${ii}`); if (e) e.textContent = inr(num(it.qty) * num(it.rate)); });
+    s.items.forEach((it, ii) => {
+      const e = $(`#amt-${si}-${ii}`); if (e) e.textContent = inr(num(it.qty) * num(it.rate));
+      if ((it.meas || []).length) {
+        it.meas.forEach((m, k) => { const me = $(`#meas-amt-${si}-${ii}-${k}`); if (me) me.textContent = nfmt(num(m.nos) * num(m.l) * num(m.b)); });
+        const qe = document.getElementById(`f-cur-sections-${si}-items-${ii}-qty`);
+        if (qe && document.activeElement !== qe) qe.value = nfmt(it.qty);
+      }
+    });
     const e = $(`#sub-${si}`); if (e) e.textContent = inr(c.secs[si] ? c.secs[si].sub : 0);
   });
   (q.tools || []).forEach((t, i) => { const e = $('#tamt-' + i); if (e) e.textContent = inr(num(t.qty) * num(t.rate)); });
@@ -1787,7 +1835,34 @@ function docHtml(q) {
   if (q.opts.cover) out += coverHtml(q, label);
   out += summaryHtml(q, c, label);
   if (q.opts.annexure) c.secs.forEach((x, i) => { out += annexHtml(x, i); });
+  if (q.opts.measure && hasMeasurements(q)) out += measureSheetHtml(q);
   return out;
+}
+/* ---------------- measurement sheet ---------------- */
+/* Interiors only: flattens every item that has a measurement sheet (see app3.js measBlock) into one
+   printable page, linked to this document by its number in the header (pageHead prints q.no either way). */
+function measureItems(q) {
+  const out = [];
+  (q.sections || []).forEach(s => (s.items || []).forEach(it => { if ((it.meas || []).length) out.push({ it, room: s.name || '' }); }));
+  return out;
+}
+const hasMeasurements = q => q.div !== 'paints' && measureItems(q).length > 0;
+function measureSheetHtml(q) {
+  const items = measureItems(q);
+  let n = 0, grand = 0;
+  const rows = items.map(({ it, room }) => {
+    n++;
+    const tot = measTotal(it); grand += tot;
+    const subRows = (it.meas || []).map((m, k) => `<tr><td class="ref">${n}.${k + 1}</td><td>${esc(m.label || '—')}</td><td class="am">${nfmt(m.nos)}</td><td class="am">${nfmt(m.l)}</td><td class="am">${nfmt(m.b)}</td><td class="am">${nfmt(num(m.nos) * num(m.l) * num(m.b))}</td></tr>`).join('');
+    return `<tr class="grp"><td colspan="5">${n}. ${esc(it.desc || 'Untitled item')}${room ? '  ·  ' + esc(room) : ''}</td><td class="am">${nfmt(tot)}</td></tr>${subRows}`;
+  }).join('');
+  return `<section class="sheet measure">${pageHead(q, 'Measurement Sheet')}
+    <h2 class="doc-title">Measurement sheet</h2>
+    <p class="lede">Site measurements behind ${esc(docLabel(q))} ${esc(q.no)}${q.client && q.client.name ? ', for ' + esc(q.client.name) : ''}. Each item's rows add up to the quantity used in the ${docLabel(q).toLowerCase()}.</p>
+    <table class="ptab mstab"><thead><tr><th>Ref</th><th>Description</th><th class="am">Nos</th><th class="am">Length (ft)</th><th class="am">Breadth / height (ft)</th><th class="am">Area (sq.ft)</th></tr></thead>
+    <tbody>${rows || `<tr><td colspan="6" class="sy">No measurements recorded yet.</td></tr>`}</tbody></table>
+    <div class="tot-wrap"><div class="totals"><div class="grand"><span>Total measured area</span><b>${nfmt(grand)} sq.ft</b></div></div></div>
+  </section>`;
 }
 function pageHead(q, label) {
   const isQ = q.type === 'quote';
@@ -1825,9 +1900,15 @@ function scheduleDoc(q, c) {
 }
 function notesBank(q) {
   const st = S.settings;
-  const bankTxt = [st.gstin ? 'GSTIN: ' + st.gstin : '', (st.bank || '').trim()].filter(Boolean).join('\n');
+  /* The cover page (when included) already prints our address once. When there is no
+     cover page — bills, by default — print it here instead, so it still appears exactly
+     once in the document. The GSTIN is shown only on documents where GST is charged. */
+  const co = [];
+  if (!q.opts.cover && (st.address || '').trim()) co.push(st.address.trim());
+  if (q.gstOn && (st.gstin || '').trim()) co.push('GSTIN: ' + st.gstin.trim());
+  const bankTxt = [co.join('\n'), (st.bank || '').trim()].filter(Boolean).join('\n');
   const notes = (q.notes || '').trim() ? `<div><div class="dh">Notes</div><div class="notes">${esc(q.notes)}</div></div>` : '';
-  const bank = bankTxt ? `<div><div class="dh">Bank &amp; tax details</div><div class="bank">${esc(bankTxt)}</div></div>` : '';
+  const bank = bankTxt ? `<div><div class="dh">${co.length ? 'Company &amp; bank details' : 'Bank details'}</div><div class="bank">${esc(bankTxt)}</div></div>` : '';
   return (notes || bank) ? `<div class="two block-avoid">${notes}${bank}</div>` : '';
 }
 const termsList = q => (q.terms || '').split('\n').map(x => x.trim()).filter(Boolean);
@@ -1895,7 +1976,7 @@ function paintCover(q, c) {
         <div class="kv"><span>Date of site visit</span><b>${p.visitDate ? fmtDate(p.visitDate) : '—'}</b></div><div class="kv"><span>Visited by</span><b>${esc(p.visitedBy || '—')}</b></div><div class="kv"><span>City</span><b>${esc(p.city || '—')}</b></div></div>
       <div class="pc-logo">${brandBlock(40)}</div>
       <div class="pc-c r"><div class="kv"><span>Service provider</span><b>${esc(st.name)}</b></div><div class="kv"><span>Address</span><b>${esc(st.address || '—')}</b></div>
-        <div class="kv"><span>Phone</span><b>${esc(st.phone || '—')}</b></div>${st.email ? `<div class="kv"><span>Email</span><b>${esc(st.email)}</b></div>` : ''}${st.gstin ? `<div class="kv"><span>GSTIN</span><b>${esc(st.gstin)}</b></div>` : ''}</div>
+        <div class="kv"><span>Phone</span><b>${esc(st.phone || '—')}</b></div>${st.email ? `<div class="kv"><span>Email</span><b>${esc(st.email)}</b></div>` : ''}${(q.gstOn && st.gstin) ? `<div class="kv"><span>GSTIN</span><b>${esc(st.gstin)}</b></div>` : ''}</div>
     </div>
     <div class="pc-main"><div class="eyebrow dark">Interior &amp; exterior painting</div><h1>Service Estimate</h1><p class="pc-est">Estimate no. ${esc(q.no)}</p>
       <div class="pc-cols">
@@ -2147,19 +2228,27 @@ function setPageFoot(q) {
   let el = $('#pagefoot');
   if (!el) { el = document.createElement('style'); el.id = 'pagefoot'; document.head.appendChild(el); }
   let lab = docLabel(q), no = q.no;
-  if (S.doc !== 'quote' && q.deal) { lab = S.doc === 'wo' ? 'Work order' : 'Agreement'; no = S.doc === 'wo' ? q.deal.woNo : q.deal.agNo; }
+  if (S.doc === 'measure') lab = 'Measurement sheet';
+  else if ((S.doc === 'wo' || S.doc === 'ag') && q.deal) { lab = S.doc === 'wo' ? 'Work order' : 'Agreement'; no = S.doc === 'wo' ? q.deal.woNo : q.deal.agNo; }
   const t = `${S.settings.name}  ·  ${lab} ${no}`.replace(/["\\\n]/g, '');
   el.textContent = `@page{@bottom-left{content:"${t}";font:8pt 'Source Sans 3',sans-serif;color:#7a848a;margin-left:16mm;vertical-align:top;padding-top:4mm}@bottom-right{content:counter(page);font:8pt 'Source Sans 3',sans-serif;color:#7a848a;margin-right:16mm;vertical-align:top;padding-top:4mm}}@page cover{@bottom-left{content:none}@bottom-right{content:none}}`;
 }
 function previewHtml() {
-  const q = S.cur, isQ = q.type === 'quote', kind = isQ && can('deals') ? S.doc : 'quote';
+  const q = S.cur, isQ = q.type === 'quote';
   const pt = q.div === 'paints';
-  const tabs = isQ && can('deals') ? `<div class="seg" role="group" aria-label="Document">${[['quote', pt ? 'Estimate' : 'Quotation'], ['wo', 'Work order'], ['ag', 'Agreement']].map(([k, l]) => `<button data-act="doc" data-kind="${k}" aria-pressed="${kind === k}">${l}</button>`).join('')}</div>` : '';
-  const body = kind === 'quote' ? docHtml(q) : flowHtml(dealDoc(q));
+  const kinds = [['quote', pt ? 'Estimate' : 'Quotation']];
+  if (isQ && can('deals')) kinds.push(['wo', 'Work order'], ['ag', 'Agreement']);
+  if (isQ && hasMeasurements(q)) kinds.push(['measure', 'Measurements']);
+  const kind = kinds.some(([k]) => k === S.doc) ? S.doc : 'quote';
+  const tabs = kinds.length > 1 ? `<div class="seg" role="group" aria-label="Document">${kinds.map(([k, l]) => `<button data-act="doc" data-kind="${k}" aria-pressed="${kind === k}">${l}</button>`).join('')}</div>` : '';
+  const body = kind === 'quote' ? docHtml(q) : kind === 'measure' ? measureSheetHtml(q) : flowHtml(dealDoc(q));
+  const note = kind === 'quote' ? 'This is exactly what the client will get.'
+    : kind === 'measure' ? 'Your own working record. Print or save it on its own here any time, whether or not it is switched on inside the quotation (set that in Edit, under "What to include").'
+    : 'Filled in from the ' + (pt ? 'estimate' : 'quotation') + '. Use Edit details to change the amount, dates or clauses, or download the Word file to change any wording freely.';
   return `<div class="edbar"><button class="btn ghost" data-act="back-edit">${ic('back')}Back to edit</button>${tabs}<div class="grow"></div>
-    ${kind !== 'quote' ? `<button class="btn" data-act="edit-deal">Edit details</button><button class="btn" data-act="download-doc">${ic('download')}Download Word</button>` : ''}
+    ${kind === 'wo' || kind === 'ag' ? `<button class="btn" data-act="edit-deal">Edit details</button><button class="btn" data-act="download-doc">${ic('download')}Download Word</button>` : ''}
     <button class="btn primary" data-act="print">${ic('print')}Print / Save as PDF</button></div>
-    <p class="pv-note">${kind === 'quote' ? 'This is exactly what the client will get.' : 'Filled in from the ' + (pt ? 'estimate' : 'quotation') + '. Use Edit details to change the amount, dates or clauses, or download the Word file to change any wording freely.'} In the print window choose <b>Save as PDF</b>, paper <b>A4</b>, and switch on <b>Background graphics</b>.</p>
+    <p class="pv-note">${note} In the print window choose <b>Save as PDF</b>, paper <b>A4</b>, and switch on <b>Background graphics</b>.</p>
     <div class="docwrap" id="docwrap"><div class="doc" id="doc">${body}</div></div>`;
 }
 function fitDoc() {
@@ -2492,11 +2581,15 @@ function normalize(q) {
   q.client = { name: '', phone: '', email: '', address: '', ...(q.client || {}) };
   q.sections = (q.sections || []).map(s => ({
     id: s.id || uid(), name: '', dims: '', hero: '', ...s,
-    items: (s.items || []).map(i => ({ id: i.id || uid(), desc: '', spec: '', size: '', qty: pt ? 0 : 1, unit: 'sq.ft', rate: 0, ...(pt ? { product: '' } : {}), ...i, imgs: Array.isArray(i.imgs) ? i.imgs : [] }))
+    items: (s.items || []).map(i => ({
+      id: i.id || uid(), desc: '', spec: '', size: '', qty: pt ? 0 : 1, unit: 'sq.ft', rate: 0, ...(pt ? { product: '' } : {}), ...i,
+      imgs: Array.isArray(i.imgs) ? i.imgs : [],
+      meas: Array.isArray(i.meas) ? i.meas.map(m => ({ id: m.id || uid(), label: '', nos: 1, l: 0, b: 0, ...m })) : []
+    }))
   }));
   q.discount = { mode: 'pct', value: 0, ...(q.discount || {}) };
   q.gstOn = q.gstOn !== false; if (q.gstPct == null) q.gstPct = 18;
-  q.opts = pt ? { cover: true, why: true, health: true, photos: true, annexure: false, ...(q.opts || {}) } : { cover: true, why: true, annexure: true, health: false, photos: false, ...(q.opts || {}) };
+  q.opts = pt ? { cover: true, why: true, health: true, photos: true, annexure: false, ...(q.opts || {}) } : { cover: true, why: true, annexure: true, health: false, photos: false, measure: false, ...(q.opts || {}) };
   q.schedule = (q.schedule || []).map(r => ({ date: '', ...r })); q.payments = q.payments || []; q.history = q.history || [];
   if (pt) {
     q.paint = { visitDate: '', visitedBy: '', city: '', tier: 'Classic', basis: 'measured', days: '', start: '', end: '', ...(q.paint || {}) };
@@ -2527,8 +2620,60 @@ function openQ(id, view, doc) {
   const q = S.quotes.get(id);
   if (!q) return;
   S.cur = normalize(clone(q)); S.isNew = false; S.dirty = false; S.saveMsg = ''; S.saveErr = false; S.view = view; S.doc = doc || 'quote'; S.tab = q.div;
-  if (S.doc !== 'quote') ensureDeal();
+  if (S.doc === 'wo' || S.doc === 'ag') ensureDeal();
   render();
+}
+/* ---------------- duplicate, with the copy placed under a client ---------------- */
+function renderDup() { const el = $('#dupmodal'); if (el) el.innerHTML = S.dup ? dupModalHtml() : ''; }
+function dupModalHtml() {
+  const dp = S.dup; if (!dp) return '';
+  const src = S.quotes.get(dp.id); if (!src) return '';
+  const div = src.div, pt = div === 'paints';
+  const word = pt ? (src.type === 'quote' ? 'estimate' : 'bill') : (src.type === 'quote' ? 'quotation' : 'bill');
+  const names = [...S.leads.values()].filter(l => l.div === div).map(l => l.name).filter(Boolean);
+  return `<div class="modal-bg"><div class="modal">
+    <h3>Duplicate this ${esc(word)}</h3>
+    <p class="hint">Who is this copy for? Leave the name as it is to keep it with ${esc(src.client && src.client.name ? src.client.name : 'the same client')}. Type an existing name to move the copy under that client instead, or a new name to create a new lead for it.</p>
+    <datalist id="duplist">${names.map(n => `<option value="${esc(n)}">`).join('')}</datalist>
+    <div class="f"><label for="dup-name">Client name</label><input class="text" id="dup-name" list="duplist" value="${esc(dp.name)}" autocomplete="off" ${dp.busy ? 'disabled' : ''}></div>
+    <div class="f" style="margin-top:10px"><label for="dup-phone">Phone <span class="hint" style="text-transform:none;letter-spacing:0">(used only if a new lead is created)</span></label><input class="text" id="dup-phone" value="${esc(dp.phone)}" ${dp.busy ? 'disabled' : ''}></div>
+    ${dp.err ? `<p class="hint" style="color:#b5392c;margin-top:10px">${esc(dp.err)}</p>` : ''}
+    <div class="btnrow" style="margin-top:18px;justify-content:flex-end">
+      <button class="btn ghost" data-act="dup-cancel" ${dp.busy ? 'disabled' : ''}>Cancel</button>
+      <button class="btn primary" data-act="dup-go" ${dp.busy ? 'disabled' : ''}>${dp.busy ? 'Duplicating…' : 'Duplicate'}</button>
+    </div>
+  </div></div>`;
+}
+async function doDuplicate() {
+  const dp = S.dup; if (!dp || dp.busy) return;
+  const src = S.quotes.get(dp.id); if (!src) { S.dup = null; renderDup(); return; }
+  const nameEl = $('#dup-name'), phoneEl = $('#dup-phone');
+  const name = ((nameEl ? nameEl.value : dp.name) || '').trim();
+  const phone = ((phoneEl ? phoneEl.value : dp.phone) || '').trim();
+  if (!name) { dp.err = 'Enter the client name'; renderDup(); return; }
+  dp.name = name; dp.phone = phone; dp.busy = true; dp.err = ''; renderDup();
+  try {
+    const div = src.div, norm = s => (s || '').trim().toLowerCase();
+    let lead = [...S.leads.values()].find(l => l.div === div && norm(l.name) === norm(name)), isNewLead = false;
+    if (!lead) {
+      lead = newLead(div); lead.name = name; lead.phone = phone; isNewLead = true;
+      await S.db.doc('leads/' + lead.id).set(strip(lead));
+      S.leads.set(lead.id, lead);
+    }
+    const q = normalize(clone(src));
+    q.id = uid(); q.no = nextNo(q.type, q.div); q.status = 'draft'; q.date = today(); q.followUp = ''; q.payments = []; q.rev = 0; q.parent = ''; delete q.deal;
+    const sameLead = lead.id === src.leadId;
+    q.leadId = lead.id;
+    q.client = { name: lead.name || name, phone: lead.phone || phone, email: (lead.email || (src.client && src.client.email) || ''), address: (lead.address || (src.client && src.client.address) || '') };
+    if (!sameLead) q.site = lead.address || q.site;
+    q.validUntil = q.type === 'quote' ? addDays(q.date, (q.div === 'paints' ? num(S.settings.paintValidityDays) : num(S.settings.validityDays)) || 15) : '';
+    q.createdBy = S.me.id; q.createdAt = q.updatedAt = Date.now(); q.history = [{ s: 'draft', at: Date.now(), by: S.me.id }];
+    await S.db.doc('quotes/' + q.id).set(strip(q));
+    S.dup = null; renderDup();
+    toast(isNewLead ? `Copied as ${q.no}, under a new lead for ${name}` : `Copied as ${q.no}, under ${lead.name}`);
+  } catch {
+    dp.busy = false; dp.err = 'Could not duplicate. Try again.'; renderDup();
+  }
 }
 async function changeLeadStage(stage) {
   const l = S.lead;
@@ -2614,13 +2759,13 @@ async function act(b) {
     case 'open-doc': openQ(d.id, 'preview', d.kind); break;
     case 'dup': {
       const src = S.quotes.get(d.id); if (!src) break;
-      const q = normalize(clone(src));
-      q.id = uid(); q.no = nextNo(q.type, q.div); q.status = 'draft'; q.date = today(); q.followUp = ''; q.payments = []; q.leadId = ''; q.parent = ''; q.rev = 0; delete q.deal;
-      q.validUntil = q.type === 'quote' ? addDays(q.date, (q.div === 'paints' ? num(S.settings.paintValidityDays) : num(S.settings.validityDays)) || 15) : '';
-      q.createdBy = S.me.id; q.createdAt = q.updatedAt = Date.now(); q.history = [{ s: 'draft', at: Date.now(), by: S.me.id }];
-      try { await S.db.doc('quotes/' + q.id).set(strip(q)); toast('Copied as ' + q.no); } catch { toast('Could not duplicate'); }
+      S.dup = { id: d.id, name: (src.client && src.client.name) || '', phone: (src.client && src.client.phone) || '', busy: false, err: '' };
+      renderDup();
+      setTimeout(() => { const e = $('#dup-name'); if (e) { e.focus(); e.select(); } }, 30);
       break;
     }
+    case 'dup-cancel': if (!S.dup || S.dup.busy) break; S.dup = null; renderDup(); break;
+    case 'dup-go': await doDuplicate(); break;
     case 'revise': {
       if (S.cur && S.cur.id === d.id) { clearTimeout(S.saveTimer); S.dirty = true; await flushSave(); }
       const src = S.cur && S.cur.id === d.id ? S.cur : S.quotes.get(d.id); if (!src) break;
@@ -2644,8 +2789,8 @@ async function act(b) {
     case 'type': S.typeF = d.v; S.statusF = 'all'; refreshList(); break;
     case 'filter': S.statusF = (S.statusF === d.v && d.v !== 'all') ? 'all' : d.v; refreshList(); break;
     case 'back': { const div = cur ? cur.div : S.tab; await leaveEditor(); S.tab = div; S.sub = 'quotes'; S.view = 'home'; render(); break; }
-    case 'to-preview': S.doc = d.kind || 'quote'; if (S.doc !== 'quote') ensureDeal(); S.view = 'preview'; render(); break;
-    case 'doc': S.doc = d.kind; if (S.doc !== 'quote') ensureDeal(); render(); break;
+    case 'to-preview': S.doc = d.kind || 'quote'; if (S.doc === 'wo' || S.doc === 'ag') ensureDeal(); S.view = 'preview'; render(); break;
+    case 'doc': S.doc = d.kind; if (S.doc === 'wo' || S.doc === 'ag') ensureDeal(); render(); break;
     case 'back-edit': S.view = 'edit'; render(); break;
     case 'edit-deal': S.view = 'edit'; render(); scrollToEl('deal'); break;
     case 'download-doc': await downloadDoc(); break;
@@ -2668,6 +2813,14 @@ async function act(b) {
     case 'down-item': if (move(cur.sections[si].items, ii, 1)) { touch(); rerenderEdit(); } break;
     case 'add-img': await addImages('item', si, ii); break;
     case 'del-img': cur.sections[si].items[ii].imgs.splice(+d.k, 1); touch(); rerenderEdit(); break;
+    case 'add-meas': {
+      const it = cur.sections[si].items[ii]; it.meas = it.meas || []; it.meas.push(newMeasRow()); it.qty = round2(measTotal(it)); touch();
+      rerenderEdit(`f-cur-sections-${si}-items-${ii}-meas-${it.meas.length - 1}-label`); break;
+    }
+    case 'del-meas': {
+      const it = cur.sections[si].items[ii]; it.meas.splice(+d.k, 1); it.qty = round2(measTotal(it)); touch(); rerenderEdit(); break;
+    }
+    case 'clear-meas': cur.sections[si].items[ii].meas = []; touch(); rerenderEdit(); break;
     case 'add-hero': await addImages('hero', si); break;
     case 'del-hero': cur.sections[si].hero = ''; touch(); rerenderEdit(); break;
     case 'add-photos': await addImages('photos'); break;
@@ -2734,6 +2887,8 @@ function onField(e) {
   setPath(root, p, v);
   if (p === 'deal.amountAuto') { if (v === false && !num(S.cur.deal.amount)) S.cur.deal.amount = calc(S.cur).total; touch(); rerenderEdit(); return; }
   if (e.type === 'change' && /^sections\.\d+\.items\.\d+\.(desc|product)$/.test(p)) catalogFill(p);
+  const mm = p.match(/^sections\.(\d+)\.items\.(\d+)\.meas\.\d+\.(nos|l|b)$/);
+  if (mm) { const it = S.cur.sections[+mm[1]].items[+mm[2]]; it.qty = round2(measTotal(it)); }
   touch(); refreshLive();
 }
 function catalogFill(p) {

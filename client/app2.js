@@ -161,7 +161,7 @@ function render() {
   else if (S.view === 'edit' && S.cur) main = editHtml();
   else if (S.view === 'lead' && S.lead) main = leadHtml();
   else if (S.view === 'preview' && S.cur) main = previewHtml();
-  app.innerHTML = appbarHtml() + `<main class="wrap" id="main">${main}</main><div id="toast" class="toast" role="status" aria-live="polite"></div>`;
+  app.innerHTML = appbarHtml() + `<main class="wrap" id="main">${main}</main><div id="toast" class="toast" role="status" aria-live="polite"></div><div id="dupmodal">${S.dup ? dupModalHtml() : ''}</div>`;
   window.scrollTo(0, 0);
   if (S.view === 'home') refreshHome();
   if (S.view === 'edit') { paintSave(); refreshLive(); }
